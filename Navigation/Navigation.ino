@@ -13,7 +13,7 @@
 
 DualVNH5019MotorShield md;
 //M1 positive forward - left motor
-//N2 negative forward - right motor
+//M2 negative forward - right motor
 
 
 const unsigned int TRIG_PIN_RIGHT=51;
@@ -30,15 +30,20 @@ const float ENCODER_PER_REV = 1632.67;
 const float TURN_RADIUS = 50.8;
 const float WHEEL_RADIUS = 40.0;
 
+unsigned int state=0;
+unsigned int forwardSpeed=50;
+
 double leftSpeed, leftSetPoint, leftOutputVal;
-double leftTimePrev;
-double leftSpeedPrev;
+double leftTimePrev, leftSpeedPrev;
 int leftEncPrev;
+int leftDirection, leftAngle;
+bool turningLeft;
 
 double rightSpeed, rightSetPoint, rightOutputVal;
-double rightTimePrev;
-double rightSpeedPrev;
+double rightTimePrev, rightSpeedPrev;
 int rightEncPrev;
+int rightDirection, rightAngle;
+bool turningRight;
 
 
 AutoPID leftPID(&leftSpeed, &leftSetPoint, &leftOutputVal, OUTPUT_MIN, OUTPUT_MAX, KP, KI, KD);
@@ -80,14 +85,18 @@ void setup()
   leftTimePrev = 0;
   leftEncPrev = 0;
   leftSpeedPrev = 0;
+  leftDirection = 1;
+  turningLeft = false;
+  leftPID.setTimeStep(1);
 
   rightTimePrev = 0;
   rightEncPrev = 0;
   rightSpeedPrev = 0;
+  rightDirection = -1;
+  turningRight = false;
+  rightPID.setTimeStep(1);
 
   delay(100);
-  leftPID.setTimeStep(1);
-  rightPID.setTimeStep(1);
 }
 
 int distance(unsigned int trig,unsigned int echo)
@@ -101,22 +110,52 @@ int distance(unsigned int trig,unsigned int echo)
   return duration/29/2;
 }
 
-void turnLeft(unsigned int angle)
-{
-  float angleRad = angle * PI/180;
-  unsigned int countsToTurn = (unsigned int)(ENCODER_PER_REV*(angleRad * TURN_RADIUS / WHEEL_RADIUS)/(2*PI))*2;
-  Serial.println(countsToTurn);
-  leftEnc.write(0);
-  rightEnc.write(0);
-//  md.setM1Speed(-200);
-  md.setM2Speed(-200);
-  while(abs(leftEnc.read()) < countsToTurn && abs(rightEnc.read()) < countsToTurn)
-  {
-    delay(2);
-  }
-  md.setM1Speed(0);
-  md.setM2Speed(0);
-}
+//void findPost()
+//{
+//  //turnLeft(30); Turn to no longer be facing into the ramp
+//  int[]Readings= new int[5];
+//  int sum=0;
+//  int average=0;
+//  int tmp;
+//  bool atPost=false;
+//  for(int i=0;i<5;i++){
+//    tmp=10000;
+//    while(tmp>500){
+//      tmp=distance(TRIG_PIN_CENTER,ECHO_PIN_CENTER);
+//    }
+//    Readings[i]=tmp;
+//    sum+=Readings[i];
+//  }
+//  average=sum/5;
+//  
+//  while(!atPost){
+//    //turnLeft(5); Correct name to be whatever the turning function is
+//    tmp=10000;
+//    while(tmp>500){
+//      tmp=distance(TRIG_PIN_CENTER,ECHO_PIN_CENTER);
+//    }
+//    while(tmp<average-15&&!atPost){
+//      atPost=runTowards(tmp);
+//      while(tmp>500){
+//        tmp=distance(TRIG_PIN_CENTER,ECHO_PIN_CENTER);
+//      }
+//    }
+//    else{
+//      average+=(tmp-Readings[i])/5
+//      Readings[i]=tmp;
+//      i++;
+//    }
+//  }
+//}
+
+//Test loop
+//void loop()
+//{
+//  stopIfFault();
+//  setLeftSpeed(75, -1);
+//  setRightSpeed(75, 1);
+//  Serial.println(leftSpeed);
+//}
 
 double getLeftEncSpeed()
 {
@@ -134,7 +173,6 @@ double getLeftEncSpeed()
   return leftSpeedPrev;
 }
 
-
 double getRightEncSpeed()
 {
   int curEncVal = abs(rightEnc.read());
@@ -150,77 +188,47 @@ double getRightEncSpeed()
   }
   return rightSpeedPrev;
 }
+
 void setLeftSpeed(double target, int dir)
 {
-  leftSpeed = getLeftEncSpeed() * ENC_CONVERSION;
   leftSetPoint = abs(target);
-  leftPID.run();
-  md.setM1Speed(leftOutputVal * dir);
+  leftDirection = dir;
 }
 
 void setRightSpeed(double target, int dir)
 {
-  rightSpeed = getRightEncSpeed() * ENC_CONVERSION;
   rightSetPoint = abs(target);
+  rightDirection = dir;
+}
+
+void updatePID()
+{
+  leftSpeed = getLeftEncSpeed() * ENC_CONVERSION;
+  rightSpeed = getRightEncSpeed() * ENC_CONVERSION;
+  leftPID.run();
   rightPID.run();
-  md.setM2Speed(rightOutputVal * dir);
+  md.setM1Speed(leftOutputVal * leftDirection);
+  md.setM2Speed(rightOutputVal * rightDirection);
+}
+
+void turnLeft(unsigned int angle)
+{
+  float angleRad = angle * PI/180;
+  unsigned int countsToTurn = (unsigned int)(ENCODER_PER_REV*(angleRad * TURN_RADIUS / WHEEL_RADIUS)/(2*PI))*2;
+  int leftCurrentEnc = leftEnc.read();
+  int rightCurrentEnc = rightEnc.read();
+  setLeftSpeed(50, -1);
+  setRightSpeed(50, -1);
+  while(abs(leftEnc.read()) < countsToTurn+leftCurrentEnc && abs(rightEnc.read()) < countsToTurn+rightCurrentEnc)
+  {
+    updatePID();
+  }
+  md.setM1Speed(0);
+  md.setM2Speed(0);
 }
 
 
 void loop()
 {
-
   
-//  int distance_center=distance(TRIG_PIN_CENTER,ECHO_PIN_CENTER);
-//  int distance_right=distance(TRIG_PIN_RIG?HT,ECHO_PIN_RIGHT);
-//  int distance_left=distance(TRIG_PIN_LEFT,ECHO_PIN_LEFT);
-  
-  stopIfFault();
-  setLeftSpeed(75, -1);
-  setRightSpeed(75, 1);
-  Serial.println(leftSpeed);
-
-
-
-  /*for(i=100;i<400;i+=10){
-    md.setM1Speed(-i);
-    md.setM2Speed(i);
-    delay(1000);
-  }
-  md.setM1Speed(0);
-  md.setM2Speed(0);
-  delay(10);
-  for(i=100;i<400;i+=10){
-    md.setM1Speed(i);
-    md.setM2Speed(-i);
-    delay(1000);
-  }*/
-
-/*  if(distance_center!=0){
-    Serial.println(distance_center);
-    if(distance_center>20&&distance_center<100){
-      md.setM1Speed(-distance_center);
-      md.setM2Speed(distance_center);
-    }
-    if(distance_center<=20){
-      md.setM1Speed(0);
-      md.setM2Speed(0);
-      while(1){}
-    }
-  }
-  if(distance_right!=0){
-    Serial.println(distance_right);
-  }
-  if(distance_left!=0){
-    Serial.println(distance_left);
-  }
-    */
-
-//State 1: finding the ramp
-  //State 2: crossing the ramp
-  //State 3: finding the goal post
-  //State 4: stop at goal
-  //State 5: return to ramp
-  //State 6: cross ramp again
-  //State 7: return to home base
 }
