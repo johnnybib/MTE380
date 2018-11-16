@@ -4,11 +4,24 @@
 
 #include <DualVNH5019MotorShield.h>
 
-#define KP 15
-#define KI 0.0531
-#define KD 0.02655
+#define ENABLE_DEBUG
+
+//#define KP_LEFT 5
+//#define KI_LEFT 0.0531*200
+//#define KD_LEFT 0.02655*10
+
+
+#define KP_LEFT 15
+#define KI_LEFT 0.0531
+#define KD_LEFT 0.02655
+
+
+#define KP_RIGHT 15
+#define KI_RIGHT 0.0531
+#define KD_RIGHT 0.02655
+
 #define OUTPUT_MIN 0
-#define OUTPUT_MAX 400
+#define OUTPUT_MAX 200
 
 
 DualVNH5019MotorShield md;
@@ -30,24 +43,23 @@ const float ENCODER_PER_REV = 1632.67;
 const float TURN_RADIUS = 50.8;
 const float WHEEL_RADIUS = 40.0;
 
-unsigned int state=0;
-unsigned int forwardSpeed=50;
+unsigned int state = 0;
+unsigned int forwardSpeed = 50;
+unsigned int turnSpeed = 50;
 
 double leftSpeed, leftSetPoint, leftOutputVal;
 double leftTimePrev, leftSpeedPrev;
 int leftEncPrev;
 int leftDirection, leftAngle;
-bool turningLeft;
 
 double rightSpeed, rightSetPoint, rightOutputVal;
 double rightTimePrev, rightSpeedPrev;
 int rightEncPrev;
 int rightDirection, rightAngle;
-bool turningRight;
 
 
-AutoPID leftPID(&leftSpeed, &leftSetPoint, &leftOutputVal, OUTPUT_MIN, OUTPUT_MAX, KP, KI, KD);
-AutoPID rightPID(&rightSpeed, &rightSetPoint, &rightOutputVal, OUTPUT_MIN, OUTPUT_MAX, KP, KI, KD);
+AutoPID leftPID(&leftSpeed, &leftSetPoint, &leftOutputVal, OUTPUT_MIN, OUTPUT_MAX, KP_LEFT, KI_LEFT, KD_LEFT);
+AutoPID rightPID(&rightSpeed, &rightSetPoint, &rightOutputVal, OUTPUT_MIN, OUTPUT_MAX, KP_RIGHT, KI_RIGHT, KD_RIGHT);
 
 Encoder leftEnc(19, 18);
 Encoder rightEnc(20, 21);
@@ -86,14 +98,12 @@ void setup()
   leftEncPrev = 0;
   leftSpeedPrev = 0;
   leftDirection = 1;
-  turningLeft = false;
   leftPID.setTimeStep(1);
 
   rightTimePrev = 0;
   rightEncPrev = 0;
   rightSpeedPrev = 0;
   rightDirection = -1;
-  turningRight = false;
   rightPID.setTimeStep(1);
 
   delay(100);
@@ -201,34 +211,148 @@ void setRightSpeed(double target, int dir)
   rightDirection = dir;
 }
 
+void rampSpeed(double target, int dir)
+{
+  setLeftSpeed(target, dir);
+  setRightSpeed(target, dir*-1);
+  int steadyStateTime = 0;
+  do
+  {
+    updatePID();
+    if(leftPID.atSetPoint(10) && rightPID.atSetPoint(10))
+    {
+      steadyStateTime++;
+    }
+    else
+    {
+      steadyStateTime = 0;
+    }
+  }while(steadyStateTime < 100);
+//  md.setSpeeds(target * dir, target * -dir);
+}
+
+void stopMotors()
+{
+  setLeftSpeed(0, 1);
+  setRightSpeed(0, 1);
+  md.setBrakes(0, 0);
+}
+
 void updatePID()
 {
   leftSpeed = getLeftEncSpeed() * ENC_CONVERSION;
   rightSpeed = getRightEncSpeed() * ENC_CONVERSION;
+//  Serial.print("Left: ");
+//  Serial.println(leftSpeed);
+//  Serial.print("Right: ");
+//  Serial.println(rightSpeed);
   leftPID.run();
   rightPID.run();
-  md.setM1Speed(leftOutputVal * leftDirection);
-  md.setM2Speed(rightOutputVal * rightDirection);
+  md.setSpeeds(leftOutputVal * leftDirection, rightOutputVal * rightDirection);
 }
 
-void turnLeft(unsigned int angle)
+void turn(unsigned int angle, bool left)
 {
   float angleRad = angle * PI/180;
-  unsigned int countsToTurn = (unsigned int)(ENCODER_PER_REV*(angleRad * TURN_RADIUS / WHEEL_RADIUS)/(2*PI))*2;
+  float correctionFactor = 1.3;
+  unsigned int countsToTurn = (unsigned int)(ENCODER_PER_REV*(angleRad * TURN_RADIUS*2 / WHEEL_RADIUS)/(2*PI))*correctionFactor;
   int leftCurrentEnc = leftEnc.read();
   int rightCurrentEnc = rightEnc.read();
-  setLeftSpeed(50, -1);
-  setRightSpeed(50, -1);
+  if(left)
+  {
+      setRightSpeed(turnSpeed, -1);    
+  }
+  else
+  {
+      setLeftSpeed(turnSpeed, 1);    
+  }
   while(abs(leftEnc.read()) < countsToTurn+leftCurrentEnc && abs(rightEnc.read()) < countsToTurn+rightCurrentEnc)
   {
     updatePID();
   }
-  md.setM1Speed(0);
-  md.setM2Speed(0);
+  stopMotors();
 }
 
+void moveDistance(int targetDistance){
+  int currentDistance = distance(TRIG_PIN_CENTER,ECHO_PIN_CENTER);
+  int distanceToMove = currentDistance - targetDistance;
+  int encoderTicksToMove = distanceToMove*10/WHEEL_RADIUS/(2*PI)*ENCODER_PER_REV;
+  int leftCurrentEnc = leftEnc.read();
+  int rightCurrentEnc = rightEnc.read();
+  setLeftSpeed(forwardSpeed, 1);
+  setRightSpeed(forwardSpeed, -1);
+  while(abs(leftEnc.read()) < encoderTicksToMove+leftCurrentEnc && abs(rightEnc.read()) < encoderTicksToMove+rightCurrentEnc)
+  {
+    updatePID();
+  }
+  stopMotors();
+}
+void moveForward(int targetDistance){
+  int tmp=5000;
+  rampSpeed(120, 1);
+  while(tmp>targetDistance){
+    tmp=distance(TRIG_PIN_CENTER,ECHO_PIN_CENTER);
+  }
+  stopMotors();
+}
+
+void debug(String msg) {
+  #ifdef ENABLE_DEBUG
+    Serial.println(msg);
+  #endif
+}
+
+void resetVals()
+{
+  leftTimePrev = 0;
+  leftEncPrev = 0;
+  leftSpeedPrev = 0;
+  leftEnc.write(0);
+ 
+  rightTimePrev = 0;
+  rightEncPrev = 0;
+  rightSpeedPrev = 0;
+  rightEnc.write(0);
+  
+}
 
 void loop()
 {
-  
+
+//  setLeftSpeed(forwardSpeed, 1);
+//  updatePID();
+  /* Run modes
+   * 0: Move to xcm from wall
+   * 1: Rotate while scanning
+   * 2: Moving forwards while scanning
+   * 3: Moving backwards while scanning
+   * default: Finished running (stop)
+   */
+  switch(state){
+    case 0:
+      moveDistance(35);
+      resetVals();
+      delay(100);
+      debug("Moved Forward 35");
+      turn(90,true);
+      resetVals();
+      delay(100);
+      debug("Turned left 90");
+      state++;
+      break;
+    case 1:
+      moveDistance(8);
+      resetVals();
+      delay(100);
+      debug("Moved Forward 8");
+      turn(90,false);
+      resetVals();
+      delay(100);
+      debug("Turned right 90");
+      state++;
+    default:
+      stopMotors();
+      while(1){}
+      break;
+  }
 }
