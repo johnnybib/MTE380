@@ -35,9 +35,15 @@ double leftTimePrev;
 double leftSpeedPrev;
 int leftEncPrev;
 
+double rightSpeed, rightSetPoint, rightOutputVal;
+double rightTimePrev;
+double rightSpeedPrev;
+int rightEncPrev;
 
 
 AutoPID leftPID(&leftSpeed, &leftSetPoint, &leftOutputVal, OUTPUT_MIN, OUTPUT_MAX, KP, KI, KD);
+AutoPID rightPID(&rightSpeed, &rightSetPoint, &rightOutputVal, OUTPUT_MIN, OUTPUT_MAX, KP, KI, KD);
+
 Encoder leftEnc(19, 18);
 Encoder rightEnc(20, 21);
 
@@ -75,9 +81,13 @@ void setup()
   leftEncPrev = 0;
   leftSpeedPrev = 0;
 
+  rightTimePrev = 0;
+  rightEncPrev = 0;
+  rightSpeedPrev = 0;
+
   delay(100);
   leftPID.setTimeStep(1);
-
+  rightPID.setTimeStep(1);
 }
 
 int distance(unsigned int trig,unsigned int echo)
@@ -108,9 +118,9 @@ void turnLeft(unsigned int angle)
   md.setM2Speed(0);
 }
 
-float getLeftEncSpeed()
+double getLeftEncSpeed()
 {
-  int curEncVal = leftEnc.read();
+  int curEncVal = abs(leftEnc.read());
   double curTime = millis();
   if(curTime-leftTimePrev > 2)
   {
@@ -124,6 +134,39 @@ float getLeftEncSpeed()
   return leftSpeedPrev;
 }
 
+
+double getRightEncSpeed()
+{
+  int curEncVal = abs(rightEnc.read());
+  double curTime = millis();
+  if(curTime-rightTimePrev > 2)
+  {
+    double calcSpeed = (curEncVal-rightEncPrev)/((curTime-rightTimePrev));
+    rightEncPrev = curEncVal;
+    rightTimePrev = curTime;
+    double filteredSpeed = FILTER_WEIGHT*calcSpeed + (1-FILTER_WEIGHT)*rightSpeedPrev;
+    rightSpeedPrev = filteredSpeed;
+    return filteredSpeed;    
+  }
+  return rightSpeedPrev;
+}
+void setLeftSpeed(double target, int dir)
+{
+  leftSpeed = getLeftEncSpeed() * ENC_CONVERSION;
+  leftSetPoint = abs(target);
+  leftPID.run();
+  md.setM1Speed(leftOutputVal * dir);
+}
+
+void setRightSpeed(double target, int dir)
+{
+  rightSpeed = getRightEncSpeed() * ENC_CONVERSION;
+  rightSetPoint = abs(target);
+  rightPID.run();
+  md.setM2Speed(rightOutputVal * dir);
+}
+
+
 void loop()
 {
 
@@ -132,13 +175,11 @@ void loop()
 //  int distance_right=distance(TRIG_PIN_RIG?HT,ECHO_PIN_RIGHT);
 //  int distance_left=distance(TRIG_PIN_LEFT,ECHO_PIN_LEFT);
   
-  delay(1);
   stopIfFault();
-  leftSpeed = getLeftEncSpeed() * ENC_CONVERSION;
+  setLeftSpeed(75, -1);
+  setRightSpeed(75, 1);
   Serial.println(leftSpeed);
-  leftSetPoint = 50;
-  leftPID.run();
-  md.setM1Speed(leftOutputVal);
+
 
 
   /*for(i=100;i<400;i+=10){
