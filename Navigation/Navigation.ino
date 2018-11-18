@@ -44,6 +44,7 @@ const float RIGHT_ENC_CONVERSION = 28.3;
 const float ENCODER_PER_REV = 1632.67;
 const float TURN_RADIUS = 50.8;
 const float WHEEL_RADIUS = 40.0;
+const double ULTRASONIC_SEPARATION = 168;
 
 unsigned int state = 0;
 unsigned int rampSpeed = 70;
@@ -113,6 +114,10 @@ void setup()
   delay(100);
 
 #ifdef TEST
+  md.setM1Speed(120);
+  md.setM2Speed(120);
+  delay(50);
+  md.setSpeeds(0,0);
 //  setLeftSpeed(forwardSpeed, 1);
 //  setRightSpeed(forwardSpeed, -1);
 //md.setM1Speed(nonPIDSpeed);
@@ -133,7 +138,7 @@ double distance(unsigned int trig,unsigned int echo)
   digitalWrite(trig, HIGH);
   delayMicroseconds(10);
   digitalWrite(trig, LOW);
-  const unsigned long duration= pulseIn(echo, HIGH);
+  const unsigned long duration = pulseIn(echo, HIGH);
   return duration/29/2;
 }
 
@@ -224,7 +229,7 @@ void updatePID()
 void turn(unsigned int angle, bool left)
 {
   float angleRad = angle * PI/180;
-  float correctionFactor = 1.0;
+  float correctionFactor = 1.05;
   int countsToTurn = (unsigned int)(ENCODER_PER_REV*(angleRad * TURN_RADIUS*2 / WHEEL_RADIUS)/(2*PI))*correctionFactor;
   int leftCurrentEnc = leftEnc.read();
   int rightCurrentEnc = rightEnc.read();
@@ -249,7 +254,7 @@ void turn(unsigned int angle, bool left)
 }
 
 void movePID(int targetDistance){
-  int currentDistance = distance(TRIG_PIN_LEFT,ECHO_PIN_LEFT);
+  double currentDistance = (distance(TRIG_PIN_LEFT,ECHO_PIN_LEFT) + distance(TRIG_PIN_RIGHT, ECHO_PIN_RIGHT))/2.0;
   int distanceToMove = currentDistance - targetDistance;
   int encoderTicksToMove = distanceToMove*10/WHEEL_RADIUS/(2*PI)*ENCODER_PER_REV;
   leftEnc.write(0);
@@ -268,49 +273,57 @@ void movePID(int targetDistance){
   stopMotors();
 }
 
+void alignTurn(double leftDist, double rightDist, double threshold)
+{
+  double turnAngle;
+  bool turnLeft = false;
+  while(abs(leftDist-rightDist) > threshold)
+  {
+    turnAngle = atan2(abs(leftDist-rightDist)*10, ULTRASONIC_SEPARATION)*180/PI;
+//    Serial.print("Left: ");
+//    Serial.println(leftDist);
+//    Serial.print("Right: ");
+//    Serial.println(rightDist);
+//    Serial.print("Angle: ");
+//    Serial.println(turnAngle);
+    if(leftDist < rightDist)
+    {
+//      Serial.println("left");
+      turnLeft = true;
+    }
+    else if(leftDist > rightDist)
+    {
+//      Serial.println("right");
+      turnLeft = false;
+    }
+    if(turnAngle > 45)
+    {
+//      Serial.println("shit");
+      turnAngle = 45; 
+      turnLeft = !turnLeft;     
+    }
+    turn(turnAngle, turnLeft);
+    delay(1000);
+    leftDist = distance(TRIG_PIN_LEFT, ECHO_PIN_LEFT);
+    rightDist = distance(TRIG_PIN_RIGHT, ECHO_PIN_RIGHT);
+  }
+  
+}
 void alignFront(int targetDistance)
 {
   double leftDist;
   double rightDist;
-  double threshold = 2.0;
-  double turnAngle;
+  double threshold = 1.0;
   bool checkAgain = true;
   while(checkAgain)
   {
     leftDist = distance(TRIG_PIN_LEFT, ECHO_PIN_LEFT);
     rightDist = distance(TRIG_PIN_RIGHT, ECHO_PIN_RIGHT);
-    while(abs(leftDist-rightDist) > threshold)
+    alignTurn(leftDist, rightDist, threshold);
+    if(abs(leftDist - targetDistance) > threshold || abs(rightDist - targetDistance))
     {
-      turnAngle = 0.869668 * abs(leftDist - rightDist)*10;
-      Serial.print("Left: ");
-      Serial.println(leftDist);
-      Serial.print("Right: ");
-      Serial.println(rightDist);
-      Serial.print("Angle: ");
-      Serial.println(turnAngle);
-      if(turnAngle > 90)
-      {
-        Serial.println("shit");
-        turnAngle = 90;      
-      }
-      if(leftDist < rightDist)
-      {
-        Serial.println("left");
-        turn(turnAngle, true);//turn left 
-      }
-      else if(leftDist > rightDist)
-      {
-        Serial.println("right");
-        turn(turnAngle, false);//turn right
-      }
-      delay(2000);
-      leftDist = distance(TRIG_PIN_LEFT, ECHO_PIN_LEFT);
-      rightDist = distance(TRIG_PIN_RIGHT, ECHO_PIN_RIGHT);
-    }
-    if(abs(leftDist - targetDistance) > threshold)
-    {
-      movePID(targetDistance);
-      delay(2000);
+      movePID(targetDistance);        
+      delay(1000);
     }
     else
     {
@@ -320,22 +333,69 @@ void alignFront(int targetDistance)
 
 }
 
+void moveForwardAlign(int targetDistance)
+{
+  double leftDist = 5000;
+  double rightDist = 5000;
+  double degPerEnc = 0.0864696911;
+  double turnAngle;
+  int encoderDiff;
+  double timer = millis();  
+  leftEnc.write(0);
+  rightEnc.write(0);
+  md.setSpeeds(forwardSpeed, -forwardSpeed);
+  while(leftDist > targetDistance || rightDist > targetDistance){
+    if(millis() - timer > 1000)
+    {
+      stopMotors();
+      delay(500);
+      encoderDiff = abs(leftEnc.read())-abs(rightEnc.read());
+      Serial.print("Diff: ");
+      Serial.println(encoderDiff);
+      turnAngle = abs(encoderDiff)*degPerEnc;
+      Serial.print("Angle: ");
+      Serial.println(turnAngle);
+      if(encoderDiff > 0)
+      {
+        turn(turnAngle, true);//turn left
+      }
+      else
+      {
+        turn(turnAngle, false);//turn right
+      }
+      delay(500);
+//      leftEnc.write(0);
+//      rightEnc.write(0);      
+      timer = millis();
+      md.setSpeeds(forwardSpeed, -forwardSpeed);
+    }    
+    leftDist = distance(TRIG_PIN_LEFT,ECHO_PIN_LEFT);
+    rightDist = distance(TRIG_PIN_RIGHT, ECHO_PIN_RIGHT);
+    Serial.println(leftDist);
+  }
+  stopMotors();
+}
+
 void moveBackward(int targetDistance)
 {
-  int tmp=5000;
+  int leftDist = 5000;
+  int rightDist = 5000;
   md.setSpeeds(-forwardSpeed, forwardSpeed);
-  while(tmp<targetDistance){
-    tmp=distance(TRIG_PIN_LEFT,ECHO_PIN_LEFT);
-    Serial.println(tmp);
+  while(leftDist < targetDistance || rightDist < targetDistance){
+    leftDist = distance(TRIG_PIN_LEFT,ECHO_PIN_LEFT);
+    rightDist = distance(TRIG_PIN_RIGHT, ECHO_PIN_RIGHT);
+    Serial.println(rightDist);
   }
   stopMotors();
 }
 void moveForward(int targetDistance){
-  int tmp=5000;
+  int leftDist = 5000;
+  int rightDist = 5000;
   md.setSpeeds(forwardSpeed, -forwardSpeed);
-  while(tmp>targetDistance){
-    tmp=distance(TRIG_PIN_LEFT,ECHO_PIN_LEFT);
-    Serial.println(tmp);
+  while(leftDist > targetDistance || rightDist > targetDistance){
+    leftDist = distance(TRIG_PIN_LEFT,ECHO_PIN_LEFT);
+    rightDist = distance(TRIG_PIN_RIGHT, ECHO_PIN_RIGHT);
+    Serial.println(rightDist);
   }
   stopMotors();
 }
@@ -371,7 +431,7 @@ void loop()
 //Serial.println(leftSpeed);
 // rightSpeed = getRightEncSpeed() * RIGHT_ENC_CONVERSION;
 // Serial.println(rightSpeed);
-  Serial.println(distance(TRIG_PIN_RIGHT, ECHO_PIN_RIGHT));
+//  Serial.println(distance(TRIG_PIN_RIGHT, ECHO_PIN_RIGHT));
   /* Run modes
    * 0: Move to xcm from wall
    * 1: Rotate while scanning
@@ -382,11 +442,11 @@ void loop()
 #else
   switch(state){
     case 0:
-      moveForward(35);
+      moveForwardAlign(25);
       resetVals();
       delay(500);
-      debug("Moved Forward 35");
-      alignFront(35);
+      debug("Moved Forward 25");
+      alignFront(25);
       resetVals();
       delay(500);
       turn(90,true);
@@ -395,23 +455,32 @@ void loop()
       debug("Turned left 90");
       state++;
       break;
-//    case 1:
-//      moveForward(8);
-//      resetVals();
-//      delay(500);
-//      debug("Moved Forward 8");
-//      turn(90,false);
-//      resetVals();
-//      delay(500);
-//      debug("Turned right 90");
-//      state++;
-//    case 2:
-//      setLeftSpeed(forwardSpeed, -1);
-//      setRightSpeed(forwardSpeed, 1);
-//      while(true)
-//      {
-//        updatePID();
-//      }
+    case 1:
+      moveForwardAlign(21);
+      resetVals();
+      delay(500);
+      debug("Moved Forward 21");
+      alignFront(21);
+      resetVals();
+      delay(500);
+      turn(90,false);
+      resetVals();
+      delay(500);
+      debug("Turned right 90");
+      state++;
+    case 2:
+      alignFront(35);
+      resetVals();
+      delay(500);
+      state++;
+      break;      
+    case 3:
+      setLeftSpeed(forwardSpeed, -1);
+      setRightSpeed(forwardSpeed, 1);
+      while(true)
+      {
+        updatePID();
+      }
     default:
       stopMotors();
       while(1){}
