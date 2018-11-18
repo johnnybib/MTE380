@@ -33,9 +33,12 @@ DualVNH5019MotorShield md;
 const unsigned int TRIG_PIN_RIGHT=51;
 const unsigned int TRIG_PIN_CENTER=49;
 const unsigned int TRIG_PIN_LEFT=47;
+const unsigned int TRIG_PIN_BACK=40;
 const unsigned int ECHO_PIN_RIGHT=50;
 const unsigned int ECHO_PIN_CENTER=48;
 const unsigned int ECHO_PIN_LEFT=46;
+const unsigned int ECHO_PIN_BACK=41;
+
 
 const float FILTER_WEIGHT = 0.2;  
 const float LEFT_ENC_CONVERSION = 28;
@@ -235,21 +238,20 @@ void turn(unsigned int angle, bool left)
   int rightCurrentEnc = rightEnc.read();
   if(left)
   {
-      setRightSpeed(turnSpeed, -1);    
-      while(rightEnc.read() < (countsToTurn+rightCurrentEnc))
-      {
-        updatePID();
-      }    
+    setRightSpeed(turnSpeed, -1);    
+    while(rightEnc.read() < (countsToTurn+rightCurrentEnc))
+    {
+      updatePID();
+    }    
   }
   else
   {
-      setRightSpeed(turnSpeed, 1);
-      while(rightEnc.read() > (rightCurrentEnc-countsToTurn))
-      {
-        updatePID();
-      }    
+    setRightSpeed(turnSpeed, 1);
+    while(rightEnc.read() > (rightCurrentEnc-countsToTurn))
+    {
+      updatePID();
+    }    
   }
-
   stopMotors();
 }
 
@@ -340,7 +342,7 @@ void moveForwardAlign(int targetDistance)
   double degPerEnc = 0.0864696911;
   double turnAngle;
   int encoderDiff;
-  double timer = millis();  
+  unsigned long timer = millis();  
   leftEnc.write(0);
   rightEnc.write(0);
   md.setSpeeds(forwardSpeed, -forwardSpeed);
@@ -396,6 +398,23 @@ void moveForward(int targetDistance){
     leftDist = distance(TRIG_PIN_LEFT,ECHO_PIN_LEFT);
     rightDist = distance(TRIG_PIN_RIGHT, ECHO_PIN_RIGHT);
     Serial.println(rightDist);
+  }
+  stopMotors();
+}
+
+void driveUpRamp()
+{
+  double backDist = 5000;
+  unsigned long timer = millis();
+  setLeftSpeed(rampSpeed, -1);
+  setRightSpeed(rampSpeed, 1);
+  while(backDist > 10)
+  {
+    if(millis() - timer > 500)
+    {
+      backDist = distance(TRIG_PIN_BACK, ECHO_PIN_BACK);
+    }
+    updatePID();
   }
   stopMotors();
 }
@@ -475,12 +494,9 @@ void loop()
       state++;
       break;      
     case 3:
-      setLeftSpeed(forwardSpeed, -1);
-      setRightSpeed(forwardSpeed, 1);
-      while(true)
-      {
-        updatePID();
-      }
+      driveUpRamp();
+      state++;
+      break;
     default:
       stopMotors();
       while(1){}
