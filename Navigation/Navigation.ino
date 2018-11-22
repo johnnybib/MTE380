@@ -3,6 +3,9 @@
 #include <Encoder.h>
 
 #include <DualVNH5019MotorShield.h>
+#include <Servo.h> 
+#include <SoftwareSerial.h>
+
 
 #define ENABLE_DEBUG
 //#define TEST
@@ -25,19 +28,20 @@
 #define OUTPUT_MAX 200
 
 
+
 DualVNH5019MotorShield md;
 //M1 positive forward - left motor
 //M2 negative forward - right motor
-
+Servo myservo;
 
 const unsigned int TRIG_PIN_RIGHT=51;
 const unsigned int TRIG_PIN_CENTER=49;
 const unsigned int TRIG_PIN_LEFT=47;
-const unsigned int TRIG_PIN_BACK=40;
+const unsigned int TRIG_PIN_BACK=43;
 const unsigned int ECHO_PIN_RIGHT=50;
 const unsigned int ECHO_PIN_CENTER=48;
 const unsigned int ECHO_PIN_LEFT=46;
-const unsigned int ECHO_PIN_BACK=41;
+const unsigned int ECHO_PIN_BACK=42;
 
 
 const float FILTER_WEIGHT = 0.2;  
@@ -49,7 +53,7 @@ const float TURN_RADIUS = 50.8;
 const float WHEEL_RADIUS = 40.0;
 const double ULTRASONIC_SEPARATION = 168;
 
-unsigned int state = 0;
+unsigned int state = 3;
 unsigned int rampSpeed = 70;
 unsigned int pidSpeed = 50;
 unsigned int forwardSpeed = 120;
@@ -94,6 +98,8 @@ void setup()
   pinMode(ECHO_PIN_RIGHT,INPUT);
   pinMode(ECHO_PIN_CENTER,INPUT);
   pinMode(ECHO_PIN_LEFT,INPUT);
+  myservo.attach(39);
+
   Serial.begin(115200);
   Serial.println("Dual VNH5019 Motor Shield");
   md.init();
@@ -113,7 +119,8 @@ void setup()
   rightSpeedPrev = 0;
   rightDirection = -1;
   rightPID.setTimeStep(1);
-
+  
+  myservo.write(90);  // set servo to mid-point
   delay(100);
 
 #ifdef TEST
@@ -255,9 +262,7 @@ void turn(unsigned int angle, bool left)
   stopMotors();
 }
 
-void movePID(int targetDistance){
-  double currentDistance = (distance(TRIG_PIN_LEFT,ECHO_PIN_LEFT) + distance(TRIG_PIN_RIGHT, ECHO_PIN_RIGHT))/2.0;
-  int distanceToMove = currentDistance - targetDistance;
+void movePID(int distanceToMove){
   int encoderTicksToMove = distanceToMove*10/WHEEL_RADIUS/(2*PI)*ENCODER_PER_REV;
   leftEnc.write(0);
   rightEnc.write(0);
@@ -324,8 +329,8 @@ void alignFront(int targetDistance)
     alignTurn(leftDist, rightDist, threshold);
     if(abs(leftDist - targetDistance) > threshold || abs(rightDist - targetDistance))
     {
-      movePID(targetDistance);        
-      delay(1000);
+      movePID((distance(TRIG_PIN_LEFT,ECHO_PIN_LEFT) + distance(TRIG_PIN_RIGHT, ECHO_PIN_RIGHT))/2.0 - targetDistance);        
+      delay(500);
     }
     else
     {
@@ -347,7 +352,7 @@ void moveForwardAlign(int targetDistance)
   rightEnc.write(0);
   md.setSpeeds(forwardSpeed, -forwardSpeed);
   while(leftDist > targetDistance || rightDist > targetDistance){
-    if(millis() - timer > 1000)
+    if(millis() - timer > 500)
     {
       stopMotors();
       delay(500);
@@ -402,22 +407,244 @@ void moveForward(int targetDistance){
   stopMotors();
 }
 
+void moveToPost(int targetDistance)
+{
+  double dist = 5000;
+  double degPerEnc = 0.0864696911;
+  double turnAngle;
+  int encoderDiff;
+  unsigned long timer = millis();  
+  leftEnc.write(0);
+  rightEnc.write(0);
+  md.setSpeeds(forwardSpeed, -forwardSpeed);
+  while(dist > targetDistance){
+    if(millis() - timer > 500)
+    {
+      stopMotors();
+      delay(500);
+      encoderDiff = abs(leftEnc.read())-abs(rightEnc.read());
+      Serial.print("Diff: ");
+      Serial.println(encoderDiff);
+      turnAngle = abs(encoderDiff)*degPerEnc;
+      Serial.print("Angle: ");
+      Serial.println(turnAngle);
+      if(encoderDiff > 0)
+      {
+        turn(turnAngle, true);//turn left
+      }
+      else
+      {
+        turn(turnAngle, false);//turn right
+      }
+      delay(500);      
+      timer = millis();
+      md.setSpeeds(forwardSpeed, -forwardSpeed);
+    }    
+    dist = distance(TRIG_PIN_CENTER,ECHO_PIN_CENTER);
+    if(dist < targetDistance)
+    {
+      delay(200);
+      dist = distance(TRIG_PIN_CENTER,ECHO_PIN_CENTER);      
+    }
+    Serial.println(dist);
+  }
+  stopMotors();
+}
+
 void driveUpRamp()
 {
   double backDist = 5000;
   unsigned long timer = millis();
   setLeftSpeed(rampSpeed, -1);
   setRightSpeed(rampSpeed, 1);
-  while(backDist > 10)
+  while(millis() - timer < 18000)
   {
-    if(millis() - timer > 500)
-    {
-      backDist = distance(TRIG_PIN_BACK, ECHO_PIN_BACK);
-    }
+    delay(1);
     updatePID();
   }
+//  unsigned long timerForStartMeasurement = millis();
+//  setLeftSpeed(rampSpeed, -1);
+//  setRightSpeed(rampSpeed, 1);
+//  while(true)//backDist > 10)
+//  {
+//    backDist = distance(TRIG_PIN_BACK,ECHO_PIN_BACK);
+//    Serial.println(backDist); 
+////    if(millis() - timer > 500)
+////    {
+////      if(millis() - timerForStartMeasurement > 5000)
+////      {
+////        backDist = distance(TRIG_PIN_BACK, ECHO_PIN_BACK);    
+////        if(backDist < 10)
+////        {
+////          delay(200);
+////          backDist = distance(TRIG_PIN_BACK,ECHO_PIN_BACK);      
+////        }   
+////        Serial.println(backDist); 
+////      }
+////      timer = millis();
+////    }
+////    updatePID();
+//  }
+//  Serial.println("done");
   stopMotors();
 }
+
+
+void moveBackwardSense()
+{
+  //Get average
+  //Move forward in small increments checking for lower values
+  double leftDist = 5000;
+  double rightDist = 5000;
+  double degPerEnc = 0.0864696911;
+  double turnAngle;
+  int encoderDiff;
+  double timer = millis();  
+
+  double high[10];
+  boolean foundPole = false;
+  boolean foundHigh = false;
+  
+  int highCount = 0;
+  int minHigh = 10;
+  int minLow = 10;
+
+  double avgHigh = 0;
+  double avgLow = 0;
+  double distThresh = 10;
+  
+  leftEnc.write(0);
+  rightEnc.write(0);
+  while(!foundHigh)
+  {
+    avgHigh += distance(TRIG_PIN_CENTER,ECHO_PIN_CENTER);
+    highCount++;  
+    if(highCount >= minHigh)
+    {
+      avgHigh = avgHigh/highCount;
+      Serial.print("avgHigh: ");
+      Serial.println(avgHigh);
+      foundHigh = true;
+    }     
+  }
+  md.setSpeeds(-forwardSpeed, forwardSpeed);
+
+
+ 
+  while(!foundPole){
+    if(millis() - timer > 500)
+    {
+      stopMotors();
+      delay(500);
+      encoderDiff = abs(leftEnc.read())-abs(rightEnc.read());
+      Serial.print("Diff: ");
+      Serial.println(encoderDiff);
+      turnAngle = abs(encoderDiff)*degPerEnc;
+      Serial.print("Angle: ");
+      Serial.println(turnAngle);
+      if(encoderDiff > 0)
+      {
+        turn(turnAngle, true);//turn left
+      }
+      else
+      {
+        turn(turnAngle, false);//turn right
+      }
+      delay(500);  
+
+      //check values
+      boolean foundLow = false;
+      int lowCount = 0;
+      avgLow = 0;
+      while(!foundLow)
+      {
+        avgLow += distance(TRIG_PIN_CENTER,ECHO_PIN_CENTER);
+        lowCount++;  
+        if(lowCount >= minLow)
+        {
+          avgLow = avgLow/lowCount;
+          Serial.print("AvgLow: ");
+          Serial.println(avgLow);
+          foundLow = true;
+          if(avgHigh - avgLow > distThresh)
+          {
+            Serial.println("Found pole");
+            foundPole = true;
+          }
+        }     
+      }
+
+      timer = millis();
+      md.setSpeeds(-forwardSpeed, forwardSpeed);
+    }    
+  }
+  
+  movePID(avgLow*0.130526);
+  
+  stopMotors();
+}
+//
+//void moveForwardStop()
+//{
+//  double leftDist = 5000;
+//  double rightDist = 5000;
+//  double degPerEnc = 0.0864696911;
+//  double turnAngle;
+//  int encoderDiff;
+//  double timer = millis();
+//  boolean atPole = false;
+//  int readingCount = 0;  
+//  leftEnc.write(0);
+//  rightEnc.write(0);
+//  md.setSpeeds(forwardSpeed, -forwardSpeed);
+//  while(!atPole){
+//    if(millis() - timer > 1000)
+//    {
+//      stopMotors();
+//      delay(500);
+//      encoderDiff = abs(leftEnc.read())-abs(rightEnc.read());
+//      Serial.print("Diff: ");
+//      Serial.println(encoderDiff);
+//      turnAngle = abs(encoderDiff)*degPerEnc;
+//      Serial.print("Angle: ");
+//      Serial.println(turnAngle);
+//      if(encoderDiff > 0)
+//      {
+//        turn(turnAngle, true);//turn left
+//      }
+//      else
+//      {
+//        turn(turnAngle, false);//turn right
+//      }
+//      delay(500);
+////      leftEnc.write(0);
+////      rightEnc.write(0);      
+//      timer = millis();
+//      md.setSpeeds(forwardSpeed, -forwardSpeed);
+//    }    
+//    double tempDist = distance(TRIG_PIN_CENTER,ECHO_PIN_CENTER);
+//    if(tempDist < 1)
+//    {
+//      Serial.print("TempDist: ");
+//      Serial.println(tempDist); 
+//      tempDist = distance(TRIG_PIN_CENTER,ECHO_PIN_CENTER);
+//    }
+//    dist[readingCount] = tempDist;
+//    Serial.println(dist[readingCount]); 
+//    readingCount++;
+//    if(readingCount == READINGS_ARRAY_SIZE)
+//    {
+//      readingCount--;
+//      if((dist[readingCount-3]==1&&dist[readingCount-2]==1&&dist[readingCount-1]==1&&dist[readingCount]==1)||(dist[readingCount-3]>1000&&dist[readingCount-2]>1000&&dist[readingCount-1]>1000&&dist[readingCount]>1000)){
+//        atPole=1;
+//        Serial.println("At pole");  
+//      }
+//      readingCount = 0;
+//    }
+//  }
+//  stopMotors();
+//}
+
 
 void debug(String msg) {
   #ifdef ENABLE_DEBUG
@@ -488,13 +715,31 @@ void loop()
       debug("Turned right 90");
       state++;
     case 2:
-      alignFront(35);
+      alignFront(40);
       resetVals();
       delay(500);
       state++;
       break;      
     case 3:
-      driveUpRamp();
+//      driveUpRamp();
+      delay(500);
+//      movePID(20);
+//      delay(500);
+      turn(90, true);
+      delay(500);
+      alignFront(35);      
+      state++;
+      break;
+    case 4:
+      delay(1000);
+      myservo.write(0);
+      delay(1000);
+      moveBackwardSense();
+      turn(90, false);//turn right
+      myservo.write(80);
+      delay(2000);
+      moveToPost(10);
+//      moveForwardStop();//drive til reading front 1
       state++;
       break;
     default:
