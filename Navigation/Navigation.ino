@@ -126,7 +126,7 @@ void setup()
   delay(100);
 
 #ifdef TEST
-
+moveAlignDist(20);
 #endif
 }
 
@@ -232,7 +232,8 @@ void turn(unsigned int angle, bool left)
 }
 
 //Distance to move in cm
-void movePID(int distanceToMove){
+void movePID(int distanceToMove)
+{
   int encoderTicksToMove = distanceToMove*10/WHEEL_RADIUS/(2*PI)*ENCODER_PER_REV;
   leftEnc.write(0);
   rightEnc.write(0);
@@ -376,19 +377,18 @@ void moveForward(int targetDistance){
   stopMotors();
 }
 
-void moveToPost(int targetDistance)
+void moveAlignDist(int distanceToMove)
 {
-  double dist = 5000;
-  double leftDist = 5000;
-  double rightDist = 5000;
   double degPerEnc = 0.0864696911;
   double turnAngle;
   int encoderDiff;
+  int encoderTicksToMove = distanceToMove*10/WHEEL_RADIUS/(2*PI)*ENCODER_PER_REV;
   unsigned long timer = millis();  
   leftEnc.write(0);
   rightEnc.write(0);
   md.setSpeeds(forwardSpeed, -forwardSpeed);
-  while(dist > targetDistance && leftDist > targetDistance && rightDist > targetDistance){
+  while(abs(leftEnc.read()) < encoderTicksToMove && abs(rightEnc.read()) < encoderTicksToMove)
+  {
     if(millis() - timer > 500)
     {
       stopMotors();
@@ -411,25 +411,6 @@ void moveToPost(int targetDistance)
       timer = millis();
       md.setSpeeds(forwardSpeed, -forwardSpeed);
     }    
-    dist = distance(TRIG_PIN_CENTER,ECHO_PIN_CENTER);
-    leftDist = distance(TRIG_PIN_LEFT,ECHO_PIN_LEFT);
-    rightDist = distance(TRIG_PIN_RIGHT, ECHO_PIN_RIGHT);
-    if(dist < targetDistance)
-    {
-      delay(200);
-      dist = distance(TRIG_PIN_CENTER,ECHO_PIN_CENTER);      
-    }
-    if(leftDist < targetDistance)
-    {
-      delay(200);
-      leftDist = distance(TRIG_PIN_LEFT,ECHO_PIN_LEFT);
-    }
-    if(rightDist < targetDistance)
-    {
-      delay(200);
-      rightDist = distance(TRIG_PIN_RIGHT, ECHO_PIN_RIGHT);
-    }
-    Serial.println(dist);
   }
   stopMotors();
 }
@@ -440,7 +421,7 @@ void driveUpRamp()
   unsigned long timer = millis();
   setLeftSpeed(rampSpeed, -1);
   setRightSpeed(rampSpeed, 1);
-  while(millis() - timer < 18000)
+  while(millis() - timer < 15000)
   {
     delay(1);
     updatePID();
@@ -490,7 +471,7 @@ double moveBackwardSense()
   
   int highCount = 0;
   int minHigh = 100;
-  int minLow = 20;
+  int minLow = 10;
 
   double avgHigh = 0;
   double avgLow = 0;
@@ -540,10 +521,9 @@ double moveBackwardSense()
       int lowCount = 0;
       avgLow = 0;
       while(!foundLow)
-      {
+      { 
         avgLow += distance(TRIG_PIN_CENTER,ECHO_PIN_CENTER);
         lowCount++;  
-        movePID(-1);
         if(lowCount >= minLow)
         {
           avgLow = avgLow/lowCount;
@@ -718,12 +698,13 @@ void loop()
       myservo.write(0);
       delay(1000);
       distToPost = moveBackwardSense();
+      resetVals();
       delay(500);
       turn(90, false);//turn right
       resetVals();
       myservo.write(80);
       delay(2000);
-      movePID(distToPost);
+      moveAlignDist(distToPost);
       state++;
       break;
     case 5://Move backwards 20cm. Turn around 180. Align on wall at 25. Turn right
@@ -742,10 +723,10 @@ void loop()
       state++;
       break;
     case 6://Align on right wall 26 cm and turn left
-      moveForwardAlign(26);
+      moveForwardAlign(25);
       resetVals();
       delay(500);
-      alignFront(26, 1);
+      alignFront(25, 1);
       resetVals();
       delay(500);
       turn(90,true);
@@ -781,7 +762,7 @@ void loop()
       resetVals();
       myservo.write(80);
       delay(2000);
-      moveToPost(10);
+      moveAlignDist(10);
       state++;
       break;  
     default:
