@@ -69,6 +69,8 @@ double rightTimePrev, rightSpeedPrev;
 int rightEncPrev;
 int rightDirection, rightAngle;
 
+double distToPost = 0;
+
 
 AutoPID leftPID(&leftSpeed, &leftSetPoint, &leftOutputVal, OUTPUT_MIN, OUTPUT_MAX, KP_LEFT, KI_LEFT, KD_LEFT);
 AutoPID rightPID(&rightSpeed, &rightSetPoint, &rightOutputVal, OUTPUT_MIN, OUTPUT_MAX, KP_RIGHT, KI_RIGHT, KD_RIGHT);
@@ -124,20 +126,7 @@ void setup()
   delay(100);
 
 #ifdef TEST
-  md.setM1Speed(120);
-  md.setM2Speed(120);
-  delay(50);
-  md.setSpeeds(0,0);
-//  setLeftSpeed(forwardSpeed, 1);
-//  setRightSpeed(forwardSpeed, -1);
-//md.setM1Speed(nonPIDSpeed);
-//md.setM2Speed(-nonPIDSpeed);
-//  turn(90, false);
-//  resetVals();
-//  delay(1000);
-//  
-//  turn(90, true);
-//  delay(100);
+
 #endif
 }
 
@@ -196,26 +185,6 @@ void setRightSpeed(double target, int dir)
   rightDirection = dir;
 }
 
-//void rampSpeed(double target, int dir)
-//{
-//  setLeftSpeed(target, dir);
-//  setRightSpeed(target, dir*-1);
-//  int steadyStateTime = 0;
-//  do
-//  {
-//    updatePID();
-//    if(leftPID.atSetPoint(10) && rightPID.atSetPoint(10))
-//    {
-//      steadyStateTime++;
-//    }
-//    else
-//    {
-//      steadyStateTime = 0;
-//    }
-//  }while(steadyStateTime < 100);
-////  md.setSpeeds(target * dir, target * -dir);
-//}
-
 void stopMotors()
 {
   setLeftSpeed(0, 1);
@@ -262,6 +231,7 @@ void turn(unsigned int angle, bool left)
   stopMotors();
 }
 
+//Distance to move in cm
 void movePID(int distanceToMove){
   int encoderTicksToMove = distanceToMove*10/WHEEL_RADIUS/(2*PI)*ENCODER_PER_REV;
   leftEnc.write(0);
@@ -287,26 +257,26 @@ void alignTurn(double leftDist, double rightDist, double threshold)
   while(abs(leftDist-rightDist) > threshold)
   {
     turnAngle = atan2(abs(leftDist-rightDist)*10, ULTRASONIC_SEPARATION)*180/PI;
-//    Serial.print("Left: ");
-//    Serial.println(leftDist);
-//    Serial.print("Right: ");
-//    Serial.println(rightDist);
-//    Serial.print("Angle: ");
-//    Serial.println(turnAngle);
+    Serial.print("Left: ");
+    Serial.println(leftDist);
+    Serial.print("Right: ");
+    Serial.println(rightDist);
+    Serial.print("Angle: ");
+    Serial.println(turnAngle);
     if(leftDist < rightDist)
     {
-//      Serial.println("left");
+      Serial.println("left");
       turnLeft = true;
     }
     else if(leftDist > rightDist)
     {
-//      Serial.println("right");
+      Serial.println("right");
       turnLeft = false;
     }
     if(turnAngle > 45)
     {
-//      Serial.println("shit");
-      turnAngle = 45; 
+      Serial.println("shit");
+      turnAngle = 10; 
       turnLeft = !turnLeft;     
     }
     turn(turnAngle, turnLeft);
@@ -316,11 +286,10 @@ void alignTurn(double leftDist, double rightDist, double threshold)
   }
   
 }
-void alignFront(int targetDistance)
+void alignFront(int targetDistance, double threshold)
 {
   double leftDist;
   double rightDist;
-  double threshold = 1.0;
   bool checkAgain = true;
   while(checkAgain)
   {
@@ -410,6 +379,8 @@ void moveForward(int targetDistance){
 void moveToPost(int targetDistance)
 {
   double dist = 5000;
+  double leftDist = 5000;
+  double rightDist = 5000;
   double degPerEnc = 0.0864696911;
   double turnAngle;
   int encoderDiff;
@@ -417,7 +388,7 @@ void moveToPost(int targetDistance)
   leftEnc.write(0);
   rightEnc.write(0);
   md.setSpeeds(forwardSpeed, -forwardSpeed);
-  while(dist > targetDistance){
+  while(dist > targetDistance && leftDist > targetDistance && rightDist > targetDistance){
     if(millis() - timer > 500)
     {
       stopMotors();
@@ -441,10 +412,22 @@ void moveToPost(int targetDistance)
       md.setSpeeds(forwardSpeed, -forwardSpeed);
     }    
     dist = distance(TRIG_PIN_CENTER,ECHO_PIN_CENTER);
+    leftDist = distance(TRIG_PIN_LEFT,ECHO_PIN_LEFT);
+    rightDist = distance(TRIG_PIN_RIGHT, ECHO_PIN_RIGHT);
     if(dist < targetDistance)
     {
       delay(200);
       dist = distance(TRIG_PIN_CENTER,ECHO_PIN_CENTER);      
+    }
+    if(leftDist < targetDistance)
+    {
+      delay(200);
+      leftDist = distance(TRIG_PIN_LEFT,ECHO_PIN_LEFT);
+    }
+    if(rightDist < targetDistance)
+    {
+      delay(200);
+      rightDist = distance(TRIG_PIN_RIGHT, ECHO_PIN_RIGHT);
     }
     Serial.println(dist);
   }
@@ -490,7 +473,7 @@ void driveUpRamp()
 }
 
 
-void moveBackwardSense()
+double moveBackwardSense()
 {
   //Get average
   //Move forward in small increments checking for lower values
@@ -506,8 +489,8 @@ void moveBackwardSense()
   boolean foundHigh = false;
   
   int highCount = 0;
-  int minHigh = 10;
-  int minLow = 10;
+  int minHigh = 100;
+  int minLow = 20;
 
   double avgHigh = 0;
   double avgLow = 0;
@@ -544,11 +527,11 @@ void moveBackwardSense()
       Serial.println(turnAngle);
       if(encoderDiff > 0)
       {
-        turn(turnAngle, true);//turn left
+        turn(turnAngle, false);//turn right
       }
       else
       {
-        turn(turnAngle, false);//turn right
+        turn(turnAngle, true);//turn left
       }
       delay(500);  
 
@@ -560,6 +543,7 @@ void moveBackwardSense()
       {
         avgLow += distance(TRIG_PIN_CENTER,ECHO_PIN_CENTER);
         lowCount++;  
+        movePID(-1);
         if(lowCount >= minLow)
         {
           avgLow = avgLow/lowCount;
@@ -582,6 +566,7 @@ void moveBackwardSense()
   movePID(avgLow*0.130526);
   
   stopMotors();
+  return avgLow;
 }
 //
 //void moveForwardStop()
@@ -687,61 +672,118 @@ void loop()
    */
 #else
   switch(state){
-    case 0:
+    case 0://Move towards back wall and align 25cm away then turn left
       moveForwardAlign(25);
       resetVals();
       delay(500);
-      debug("Moved Forward 25");
-      alignFront(25);
+      alignFront(25, 2);
       resetVals();
       delay(500);
       turn(90,true);
       resetVals();
       delay(500);
-      debug("Turned left 90");
       state++;
       break;
-    case 1:
+    case 1://Move towards right wall and align 21cm away then turn right
       moveForwardAlign(21);
       resetVals();
       delay(500);
-      debug("Moved Forward 21");
-      alignFront(21);
+      alignFront(21, 1);
       resetVals();
       delay(500);
       turn(90,false);
       resetVals();
       delay(500);
-      debug("Turned right 90");
       state++;
-    case 2:
-      alignFront(40);
+    case 2://Align with back wall 40cm away
+      alignFront(40, 1);
       resetVals();
       delay(500);
       state++;
       break;      
-    case 3:
+    case 3://Drive up ramp. Move backwards 20cm. Turn left. Align with right wall 45 cm away
 //      driveUpRamp();
       delay(500);
-//      movePID(20);
-//      delay(500);
-      turn(90, true);
+      movePID(20);
       delay(500);
-      alignFront(35);      
+      turn(90, true);
+      resetVals();
+      delay(500);
+      alignFront(45, 2);
+      resetVals();      
       state++;
       break;
-    case 4:
+    case 4://Move backwards until post detected. Turn right. Move forward until 10cm away
       delay(1000);
       myservo.write(0);
       delay(1000);
-      moveBackwardSense();
+      distToPost = moveBackwardSense();
+      delay(500);
       turn(90, false);//turn right
+      resetVals();
+      myservo.write(80);
+      delay(2000);
+      movePID(distToPost);
+      state++;
+      break;
+    case 5://Move backwards 20cm. Turn around 180. Align on wall at 25. Turn right
+      movePID(-20);
+      delay(500);
+      turn(180, false);
+      moveForwardAlign(25);
+      resetVals();
+      delay(500);
+      alignFront(25, 2);
+      resetVals();
+      delay(500);
+      turn(90,false);
+      resetVals();
+      delay(500);
+      state++;
+      break;
+    case 6://Align on right wall 26 cm and turn left
+      moveForwardAlign(26);
+      resetVals();
+      delay(500);
+      alignFront(26, 1);
+      resetVals();
+      delay(500);
+      turn(90,true);
+      resetVals();
+      delay(500);
+      state++;
+      break;
+    case 7://Align on back wall 40cm
+      alignFront(40, 1);
+      resetVals();
+      delay(500);
+      state++;
+      break;      
+    case 8://Drive up ramp, move back 20 cm, turn right, align with right wall 45 cm
+      driveUpRamp();
+      delay(500);
+      movePID(20);
+      delay(500);
+      turn(90, false);
+      resetVals();
+      delay(500);
+      alignFront(45, 2);
+      resetVals();      
+      state++;
+      break;
+    case 9://Drive backwards until see post. Turn right. Drive until 10cm
+      delay(1000);
+      myservo.write(160);
+      delay(1000);
+      moveBackwardSense();
+      delay(500);
+      turn(90, true);//turn right
+      resetVals();
       myservo.write(80);
       delay(2000);
       moveToPost(10);
-//      moveForwardStop();//drive til reading front 1
       state++;
-      break;
+      break;  
     default:
       stopMotors();
       while(1){}
