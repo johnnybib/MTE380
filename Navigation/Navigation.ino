@@ -53,7 +53,7 @@ const float TURN_RADIUS = 50.8;
 const float WHEEL_RADIUS = 40.0;
 const double ULTRASONIC_SEPARATION = 168;
 
-unsigned int state = 3;
+unsigned int state = 0;
 unsigned int rampSpeed = 70;
 unsigned int pidSpeed = 50;
 unsigned int forwardSpeed = 120;
@@ -123,10 +123,11 @@ void setup()
   rightPID.setTimeStep(1);
   
   myservo.write(90);  // set servo to mid-point
+  
   delay(100);
 
 #ifdef TEST
-moveAlignDist(20);
+//checkPost(100);
 #endif
 }
 
@@ -465,9 +466,9 @@ double moveBackwardSense()
   int encoderDiff;
   double timer = millis();  
 
-  double high[10];
   boolean foundPole = false;
   boolean foundHigh = false;
+  int successfulChecks = 0;
   
   int highCount = 0;
   int minHigh = 100;
@@ -496,7 +497,7 @@ double moveBackwardSense()
 
  
   while(!foundPole){
-    if(millis() - timer > 500)
+    if(millis() - timer > 250)
     {
       stopMotors();
       delay(500);
@@ -520,6 +521,7 @@ double moveBackwardSense()
       boolean foundLow = false;
       int lowCount = 0;
       avgLow = 0;
+
       while(!foundLow)
       { 
         avgLow += distance(TRIG_PIN_CENTER,ECHO_PIN_CENTER);
@@ -532,21 +534,67 @@ double moveBackwardSense()
           foundLow = true;
           if(avgHigh - avgLow > distThresh)
           {
-            Serial.println("Found pole");
-            foundPole = true;
+            successfulChecks++;
+            Serial.println("Success");
+            if(successfulChecks >= 3)
+            {
+              Serial.println("Found pole");
+              foundPole = true;
+            }
+          }
+          else
+          {
+            successfulChecks = 0;
           }
         }     
-      }
+      } 
 
       timer = millis();
       md.setSpeeds(-forwardSpeed, forwardSpeed);
     }    
   }
   
+  
   movePID(avgLow*0.130526);
   
   stopMotors();
   return avgLow;
+}
+
+double checkPost(int expectedDistance)
+{
+  double threshold = 20;
+  int servoVal = 35;
+  myservo.write(servoVal);
+  delay(200);
+  double dist = distance(TRIG_PIN_CENTER, ECHO_PIN_CENTER);
+  while((dist - expectedDistance) > threshold && servoVal < 125)
+  {
+    servoVal+=2;
+    myservo.write(servoVal);
+    delay(200);
+    dist = distance(TRIG_PIN_CENTER, ECHO_PIN_CENTER);
+    if(abs(dist - expectedDistance) > threshold)
+    {
+      delay(200);
+      dist = distance(TRIG_PIN_CENTER, ECHO_PIN_CENTER);
+    }
+    Serial.println(dist);
+  }
+  int turnAngle = servoVal-80;
+  Serial.println(turnAngle);
+  resetVals();
+  if(turnAngle < 0)
+  {
+    Serial.println("Turn right");
+    turn(abs(turnAngle)+7.5, false);
+  }
+  else
+  {
+    Serial.println("Turn left");
+    turn(turnAngle+7.5, true);
+  }   
+  return dist;
 }
 //
 //void moveForwardStop()
@@ -636,6 +684,7 @@ void resetVals()
 void loop()
 {
 #ifdef TEST
+
 //  updatePID();
 //  delay(1);
 //leftSpeed = getLeftEncSpeed() * LEFT_ENC_CONVERSION;
@@ -682,7 +731,7 @@ void loop()
       state++;
       break;      
     case 3://Drive up ramp. Move backwards 20cm. Turn left. Align with right wall 45 cm away
-//      driveUpRamp();
+      driveUpRamp();
       delay(500);
       movePID(20);
       delay(500);
@@ -704,7 +753,12 @@ void loop()
       resetVals();
       myservo.write(80);
       delay(2000);
-      moveAlignDist(distToPost);
+//      distToPost = checkPost(distToPost);
+//      resetVals();
+//      delay(500);
+      moveAlignDist(distToPost+20);
+      resetVals();
+      delay(500);
       state++;
       break;
     case 5://Move backwards 20cm. Turn around 180. Align on wall at 25. Turn right
